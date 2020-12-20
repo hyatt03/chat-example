@@ -6,8 +6,10 @@
     
     <title>Pakkeleg</title>
     
+    <!-- Include bootstrap styles -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
     
+    <!-- And a few custom styles -->
     <style>
       .latest-dice-hit {
         text-align: center;
@@ -44,6 +46,7 @@
       }
     </style>
     
+    <!-- And the JS required to run bootstrap -->
     <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
@@ -52,6 +55,7 @@
     
     <main class="container">
       
+      <!-- Steal packages modal, only visible when the server allows it -->
       <div class="modal" id="myModal">
         <div class="modal-dialog modal-dialog-scrollable modal-fullscreen">
           <div class="modal-content">
@@ -67,6 +71,7 @@
       </div>
     
       <div class="game-container">
+        <!-- Dice container, has both the hit dice button as well as the latest dice hit -->
         <div id="dice">
           <button type="button" id="dice-button" class="btn btn-secondary btn-lg btn-block">
             Slå med terningen
@@ -77,6 +82,7 @@
           </div>
         </div>
     
+        <!-- List of my packages -->
         <div class="pakke-container">
           Dine pakker:
           <ul id='my-packages'>
@@ -86,20 +92,19 @@
           </ul>
         </div>
     
+        <!-- List of currently active players in the game -->
         <div class="spiller-container">
           Aktive spillere:
-          <ul id="player-list">
-            <li>J</li>
-            <li>A</li>
-            <li>D</li>
-            <li>C</li>
-          </ul>
+          <ul id="player-list"></ul>
         </div>
         
+        <!-- Notification area -->
         <div id="notification-area"></div>
       </div>
     
     </main>
+    
+    <!-- Grab some JS packages to make life easier -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/js-cookie@rc/dist/js.cookie.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.1/howler.min.js" integrity="sha512-L6Z/YtIPQ7eU3BProP34WGU5yIRk7tNHk7vaC2dB1Vy1atz6wl9mCkTPPZ2Rn1qPr+vY2mZ9odZLdGYuaBk7dQ==" crossorigin="anonymous"></script>
@@ -157,79 +162,115 @@
           
           // Listen to dice clicks
           $('#dice-button').click(function() {
+            // Ask the server for a dice hit
             socket.emit('hit-dice', my_name);
             
+            // blur the button so it doesn't mess with the colour
             document.activeElement.blur();
+            
+            // Change the dice to be inactive
             $('#dice-button').addClass('btn-secondary');
             $('#dice-button').removeClass('btn-success');
           });
           
+          // Listen for dice hits from the server
           socket.on('dice-hit', function(dice) {
+            // Update the dice value
             $('#latest-dice-name').html(dice['player']);
+            
+            // And the player who got the result
             $('#dice-value').html(dice['result']);
           });
           
+          // Listen for turn changes
           socket.on('player-turn', function(player) {
+            // Check if it's my turn
             if (player === my_name) {
+              // Set the button active
               $('#dice-button').removeClass('btn-secondary');
               $('#dice-button').addClass('btn-success');
+              
+              // And remind the player that it is their turn
               turn_sound.play();
             }
+            // Otherwise just ensure the button is inactive
             else {
               $('#dice-button').addClass('btn-secondary');
               $('#dice-button').removeClass('btn-success');
             }
           });
           
+          // Listen for the server to tell when we can steal a package
           socket.on('steal-package', function() {
+            // Show the package selector
             var myModal = $('#myModal').modal("show");
+            
+            // Play a celebration sound
             six_sound.play();
           });
           
+          // Listen for updates to the player list
           socket.on('players', function(players) {
+            // Update the player table with new players, and refresh all package counts
             players.forEach(p => {
               playerTable[p.name] = p.n_packages;
             });
             
+            // Make a list of players and the number of packages each person has
             $('#player-list').html(players.map(p => `<li style="color: ${hashStringToColor(p.name)};">${p.name} - ${p.n_packages} pakker</li>`).join(''));
           });
           
+          // Listen for notifications that a package has been stolen
           socket.on('package-stolen', function(p) {
+            // Setup an alert
             var alert_t = `
             <div class="alert alert-danger" role="alert">
               ${p.name} blev stjålet af <span style="color: ${hashStringToColor(p.new_owner)};">${p.new_owner}</span> fra <span style="color: ${hashStringToColor(p.old_owner)};">${p.old_owner}</span>
             </div>`;
             
+            // Add it to the notification area
             $('#notification-area').html(alert_t);
+            
+            // remove it again after 10 seconds
             setTimeout(() => $('#notification-area').html(''), 10000);
             
+            // If it's one of my packages, play womp-womp sound
             if (p.old_owner === my_name) {
               stolen_sound.play();
             }
           });
           
+          // Listen to the steal package buttons 
           window.steal_package = function steal_package(package_number) {
+            // Hide the steal package window
             $('#myModal').modal("hide");
+            
+            // Tell the server what package to steal
             socket.emit('steal-package', {"p": package_number, "player": my_name});
           };
           
+          // Update the list of packages in the steal packages window
           socket.on('packages', function(packages) {
             var p_labels = Object.keys(packages);
             $('#pakkeliste').html(p_labels.map(label => {
               var steal = '';
+              // Check if we're allowed to steal this package
               if (packages[label] !== my_name && (playerTable[packages[label]] >= minPackages || packages[label] === 'Ingen')) {
                 steal = ` - <button type="button" class="btn btn-primary btn-sm" onclick="window.steal_package('${label}');">Stjæl den</button>`;
               }
+              // Make a row for each package
               return `<li class="steal-package-row">${label} er ejet af <span style="color: ${hashStringToColor(packages[label])};">${packages[label]}</span>${steal}</li>`;
             }).join(''));
-              
+            
+            // Update the list of my packages
             var my_packages = [];
             p_labels.forEach(label => {
               if (packages[label] === my_name) {
                 my_packages.push(`<li>${label}</li>`);
               }
             });
-              
+            
+            // If we don't have any packages, just say that
             if (my_packages.length === 0) {
               $('#my-packages').html('Du har ingen pakker!');
             }

@@ -1,9 +1,6 @@
 {
-  "name": "Socket-Chat-Example",
-  "description": "my first socket.io app",
-  "website": "https://github.com/socketio/chat-example",
-  "repository": "https://github.com/socketio/chat-example",
-  "logo": "https://node-js-sample.herokuapp.com/node.svg",
+  "name": "Pakkeleg",
+  "description": "my first pakkeleg app",
   "success_url": "/",
   "keywords": [
     "node",

@@ -1,37 +1,242 @@
 <!doctype html>
 <html>
   <head>
-    <title>Socket.IO chat</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <title>Pakkeleg</title>
+    
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font: 13px Helvetica, Arial; }
-      form { background: #000; padding: 3px; position: fixed; bottom: 0; width: 100%; }
-      form input { border: 0; padding: 10px; width: 90%; margin-right: .5%; }
-      form button { width: 9%; background: rgb(130, 224, 255); border: none; padding: 10px; }
-      #messages { list-style-type: none; margin: 0; padding: 0; }
-      #messages li { padding: 5px 10px; }
-      #messages li:nth-child(odd) { background: #eee; }
-      #messages { margin-bottom: 40px }
+      .latest-dice-hit {
+        text-align: center;
+      }
+      
+      .btn-secondary:active, .btn-secondary:hover {
+        color: #fff !important;
+        background-color: #6c757d !important;
+        border-color: #6c757d !important;
+      }
+      
+      .btn-success:active, .btn-success:hover {
+        color: #fff !important;
+        background-color: #28a745 !important;
+        border-color: #28a745 !important;
+      }
+      
+      #notification-area {
+        position: absolute;
+        bottom: 0;
+        width: 90%;
+      }
+      
+      .game-container {
+        margin-top: 20px;
+      }
+      
+      #dice-button {
+        margin: 20px 0;
+      }
+      
+      .steal-package-row {
+        height: 40px;
+      }
     </style>
+    
+    <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
   </head>
   <body>
-    <ul id="messages"></ul>
-    <form action="">
-      <input id="m" autocomplete="off" /><button>Send</button>
-    </form>
+    
+    <main class="container">
+      
+      <div class="modal" id="myModal">
+        <div class="modal-dialog modal-dialog-scrollable modal-fullscreen">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Du skal stjæle!</h5>
+            </div>
+            <div class="modal-body">
+              <p>Du skal stjæle en pakke</p>
+              <ul id="pakkeliste"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    
+      <div class="game-container">
+        <div id="dice">
+          <button type="button" id="dice-button" class="btn btn-secondary btn-lg btn-block">
+            Slå med terningen
+          </button>
+          
+          <div class='latest-dice-hit'>
+            <span id="latest-dice-name"></span> slog <span id="dice-value"></span>
+          </div>
+        </div>
+    
+        <div class="pakke-container">
+          Dine pakker:
+          <ul id='my-packages'>
+            <li>1</li>
+            <li>3</li>
+            <li>5</li>
+          </ul>
+        </div>
+    
+        <div class="spiller-container">
+          Aktive spillere:
+          <ul id="player-list">
+            <li>J</li>
+            <li>A</li>
+            <li>D</li>
+            <li>C</li>
+          </ul>
+        </div>
+        
+        <div id="notification-area"></div>
+      </div>
+    
+    </main>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-cookie@rc/dist/js.cookie.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.1/howler.min.js" integrity="sha512-L6Z/YtIPQ7eU3BProP34WGU5yIRk7tNHk7vaC2dB1Vy1atz6wl9mCkTPPZ2Rn1qPr+vY2mZ9odZLdGYuaBk7dQ==" crossorigin="anonymous"></script>
     <script>
+      var minPackages = 2;
+      
+      var colorTable = {};
+      var playerTable = {};
+      
+      function djb2(str){
+        var hash = 5381;
+        for (var i = 0; i < str.length; i++) {
+          hash = ((hash << 5) + hash) + str.charCodeAt(i); /* hash * 33 + c */
+        }
+        return hash;
+      }
+      
+      function hashStringToColor(str) {
+        if (typeof colorTable[str] === 'undefined') {
+          var hash = djb2(str);
+          var r = (hash & 0xFF0000) >> 16;
+          var g = (hash & 0x00FF00) >> 8;
+          var b = hash & 0x0000FF;
+          colorTable[str] = "#" + ("0" + r.toString(16)).substr(-2) + ("0" + g.toString(16)).substr(-2) + ("0" + b.toString(16)).substr(-2);
+        }
+        
+        return colorTable[str];
+      }
+      
       $(function () {
+        // Open a socket connection
         var socket = io();
-        $('form').submit(function(){
-          socket.emit('chat message', $('#m').val());
-          $('#m').val('');
-          return false;
+        
+        // Load soundfiles
+        var six_sound = new Howl({
+          src: ['6er.mp3', '6er.webm']
         });
-        socket.on('chat message', function(msg){
-          $('#messages').append($('<li>').text(msg));
-          window.scrollTo(0, document.body.scrollHeight);
+        var stolen_sound = new Howl({
+          src: ['stolen.mp3', 'stolen.webm']
+        });
+        var turn_sound = new Howl({
+          src: ['tur.mp3', 'tur.webm']
+        });
+        
+        socket.on("connect", () => {
+          // Get the player name from cookies (or ask the player)
+          var my_name = Cookies.get('my_name')
+          if (typeof my_name === 'undefined') {
+            my_name = prompt('Hvad hedder du?');
+            Cookies.set('my_name', my_name);
+          }
+        
+          // Tell the server this person is active
+          socket.emit('add-player', my_name);
+          
+          // Listen to dice clicks
+          $('#dice-button').click(function() {
+            socket.emit('hit-dice', my_name);
+            
+            document.activeElement.blur();
+            $('#dice-button').addClass('btn-secondary');
+            $('#dice-button').removeClass('btn-success');
+          });
+          
+          socket.on('dice-hit', function(dice) {
+            $('#latest-dice-name').html(dice['player']);
+            $('#dice-value').html(dice['result']);
+          });
+          
+          socket.on('player-turn', function(player) {
+            if (player === my_name) {
+              $('#dice-button').removeClass('btn-secondary');
+              $('#dice-button').addClass('btn-success');
+              turn_sound.play();
+            }
+            else {
+              $('#dice-button').addClass('btn-secondary');
+              $('#dice-button').removeClass('btn-success');
+            }
+          });
+          
+          socket.on('steal-package', function() {
+            var myModal = $('#myModal').modal("show");
+            six_sound.play();
+          });
+          
+          socket.on('players', function(players) {
+            players.forEach(p => {
+              playerTable[p.name] = p.n_packages;
+            });
+            
+            $('#player-list').html(players.map(p => `<li style="color: ${hashStringToColor(p.name)};">${p.name} - ${p.n_packages} pakker</li>`).join(''));
+          });
+          
+          socket.on('package-stolen', function(p) {
+            var alert_t = `
+            <div class="alert alert-danger" role="alert">
+              ${p.name} blev stjålet af <span style="color: ${hashStringToColor(p.new_owner)};">${p.new_owner}</span> fra <span style="color: ${hashStringToColor(p.old_owner)};">${p.old_owner}</span>
+            </div>`;
+            
+            $('#notification-area').html(alert_t);
+            setTimeout(() => $('#notification-area').html(''), 10000);
+            
+            if (p.old_owner === my_name) {
+              stolen_sound.play();
+            }
+          });
+          
+          window.steal_package = function steal_package(package_number) {
+            $('#myModal').modal("hide");
+            socket.emit('steal-package', {"p": package_number, "player": my_name});
+          };
+          
+          socket.on('packages', function(packages) {
+            var p_labels = Object.keys(packages);
+            $('#pakkeliste').html(p_labels.map(label => {
+              var steal = '';
+              if (packages[label] !== my_name && (playerTable[packages[label]] >= minPackages || packages[label] === 'Ingen')) {
+                steal = ` - <button type="button" class="btn btn-primary btn-sm" onclick="window.steal_package('${label}');">Stjæl den</button>`;
+              }
+              return `<li class="steal-package-row">${label} er ejet af <span style="color: ${hashStringToColor(packages[label])};">${packages[label]}</span>${steal}</li>`;
+            }).join(''));
+              
+            var my_packages = [];
+            p_labels.forEach(label => {
+              if (packages[label] === my_name) {
+                my_packages.push(`<li>${label}</li>`);
+              }
+            });
+              
+            if (my_packages.length === 0) {
+              $('#my-packages').html('Du har ingen pakker!');
+            }
+            else {
+              $('#my-packages').html(my_packages.join(''));
+            }
+          });
         });
       });
     </script>
